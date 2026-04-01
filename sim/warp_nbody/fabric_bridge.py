@@ -4,8 +4,9 @@ import omni.usd
 
 from .instancer import INSTANCER_PATH
 
-VISUAL_SCALE = 3.0
-VISUAL_CAP   = 15.0
+_VISUAL_SCALE_REF = 3.0   # scale at reference body count
+_VISUAL_CAP_REF   = 15.0  # cap at reference body count
+_N_REF            = 1000  # reference body count
 
 
 @wp.kernel
@@ -38,11 +39,14 @@ class FabricBridge:
         self._scales_wp  = None
         self._colors_wp  = None
 
-    # initial bind
     def bind(self, sim, n_bodies: int, colorizer) -> None:
         self._sim       = sim
         self._n         = n_bodies
         self._colorizer = colorizer
+
+        density_factor      = (_N_REF / n_bodies) ** (1.0 / 3.0)
+        self._visual_scale  = _VISUAL_SCALE_REF * density_factor
+        self._visual_cap    = _VISUAL_CAP_REF   * density_factor
 
         self._pos_wp    = wp.zeros(n_bodies, dtype=wp.vec3, device="cuda:0")
         self._scales_wp = wp.zeros(n_bodies, dtype=wp.vec3, device="cuda:0")
@@ -74,7 +78,7 @@ class FabricBridge:
             # compute scales on GPU into scratch buffer
             wp.launch(kernel_compute_scales, dim=self._n, device="cuda:0", inputs=[
                 self._sim.radii, self._sim.active, self._scales_wp,
-                VISUAL_SCALE, VISUAL_CAP,
+                self._visual_scale, self._visual_cap,
             ])
 
             # compute colors on GPU into scratch buffer (no CPU involved)

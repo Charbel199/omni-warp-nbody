@@ -12,12 +12,12 @@ from ..spawner import (
 PRESETS = ["Galaxy Disk", "Sphere", "Solar System", "Random", "Binary Galaxy", "Black Hole"]
 
 SPAWN_FNS = {
-    "Galaxy Disk":   lambda n, G: spawn_galaxy_disk(n, radius=50.0, central_mass=1e6, body_mass=1.0, G=G),
-    "Sphere":        lambda n, G: spawn_sphere(n, radius=50.0, body_mass=1.0, speed_scale=0.5),
-    "Solar System":  lambda n, G: spawn_solar_system(n, G=G),
-    "Random":        lambda n, G: spawn_random(n, extent=100.0, body_mass=1.0, speed_scale=1.0),
-    "Binary Galaxy": lambda n, G: spawn_binary_galaxy(n, G=G),
-    "Black Hole":    lambda n, G: spawn_black_hole(n, G=G),
+    "Galaxy Disk":   lambda n, G, spread, body_mass: spawn_galaxy_disk(n, radius=50.0, central_mass=1e6, body_mass=body_mass, G=G, spread=spread),
+    "Sphere":        lambda n, G, spread, body_mass: spawn_sphere(n, radius=50.0, body_mass=body_mass, speed_scale=0.5, spread=spread),
+    "Solar System":  lambda n, G, spread, body_mass: spawn_solar_system(n, G=G, spread=spread),
+    "Random":        lambda n, G, spread, body_mass: spawn_random(n, extent=100.0, body_mass=body_mass, speed_scale=1.0, spread=spread),
+    "Binary Galaxy": lambda n, G, spread, body_mass: spawn_binary_galaxy(n, G=G, body_mass=body_mass, spread=spread),
+    "Black Hole":    lambda n, G, spread, body_mass: spawn_black_hole(n, G=G, body_mass=body_mass, spread=spread),
 }
 
 
@@ -32,6 +32,8 @@ class NBodyPanel:
         self._G_model         = ui.SimpleFloatModel(0.001)
         self._eps_model       = ui.SimpleFloatModel(0.05)
         self._dt_model        = ui.SimpleFloatModel(0.01)
+        self._spread_model    = ui.SimpleFloatModel(1.0)
+        self._body_mass_model = ui.SimpleFloatModel(1.0)
         self._accretion_model = ui.SimpleBoolModel(True)
 
     def build(self, on_spawn, on_stop) -> None:
@@ -39,10 +41,12 @@ class NBodyPanel:
         with self._window.frame:
             with ui.VStack(spacing=8, height=0):
                 self._build_preset_row()
-                self._build_int_slider("Body Count",     self._n_model,   100,   10000)
-                self._build_float_slider("Gravity G",    self._G_model,   1e-5,  0.1)
-                self._build_float_slider("Softening ε",  self._eps_model, 0.01,  1.0)
-                self._build_float_slider("Time Step Δt", self._dt_model,  0.001, 0.05)
+                self._build_int_slider("Body Count",     self._n_model,        100,   50000)
+                self._build_float_slider("Spread",       self._spread_model,   0.1,   5.0)
+                self._build_float_slider("Body Mass",    self._body_mass_model, 0.1,  100.0)
+                self._build_float_slider("Gravity G",    self._G_model,        1e-5,  0.1)
+                self._build_float_slider("Softening ε",  self._eps_model,      0.01,  1.0)
+                self._build_float_slider("Time Step Δt", self._dt_model,       0.001, 0.05)
                 self._build_accretion_toggle()
                 self._build_action_buttons(on_spawn, on_stop)
                 self._build_stats_panel()
@@ -80,12 +84,14 @@ class NBodyPanel:
             ui.Button(
                 "SPAWN",
                 clicked_fn=lambda: on_spawn(
-                    preset    = self._selected_preset,
-                    n         = self._n_model.get_value_as_int(),
-                    G         = self._G_model.get_value_as_float(),
-                    softening = self._eps_model.get_value_as_float(),
-                    dt        = self._dt_model.get_value_as_float(),
-                    accretion = self._accretion_model.get_value_as_bool(),
+                    preset     = self._selected_preset,
+                    n          = self._n_model.get_value_as_int(),
+                    G          = self._G_model.get_value_as_float(),
+                    softening  = self._eps_model.get_value_as_float(),
+                    dt         = self._dt_model.get_value_as_float(),
+                    spread     = self._spread_model.get_value_as_float(),
+                    body_mass  = self._body_mass_model.get_value_as_float(),
+                    accretion  = self._accretion_model.get_value_as_bool(),
                 ),
                 height=32,
             )

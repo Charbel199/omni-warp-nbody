@@ -29,12 +29,12 @@ class NBodyExtension(omni.ext.IExt):
         except Exception as e:
             carb.log_error(f"[warp_nbody] on_startup failed: {e}\n{traceback.format_exc()}")
 
-    def _on_spawn(self, preset, n, G, softening, dt, accretion) -> None:
+    def _on_spawn(self, preset, n, G, softening, dt, spread, body_mass, accretion) -> None:
         try:
             if self._running:
                 self._on_stop()
 
-            positions_np, velocities_np, masses_np = SPAWN_FNS[preset](n, G)
+            positions_np, velocities_np, masses_np = SPAWN_FNS[preset](n, G, spread, body_mass)
 
             create_instancer(n)
 
