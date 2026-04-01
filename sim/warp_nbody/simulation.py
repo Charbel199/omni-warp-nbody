@@ -76,6 +76,20 @@ def kernel_accrete_pass1(
             if masses[j] > mi or (masses[j] == mi and j < i):
                 merge_into[i] = j
                 return
+            
+
+@wp.kernel # TODO:  look into a warp.fill function
+def kernel_reset_int(arr: wp.array(dtype=int)):
+    arr[0] = int(0)
+
+
+@wp.kernel #TODO: Check tile sum or some sort of reduction tree in WARP
+def kernel_count_active(active: wp.array(dtype=int), count: wp.array(dtype=int)):
+    i = wp.tid()
+    if active[i] != 0:
+        wp.atomic_add(count, 0, 1)
+
+
 @wp.kernel
 def kernel_accrete_pass2(
     masses:     wp.array(dtype=float),
@@ -104,8 +118,9 @@ class NBodySimulation:
         self.active:     wp.array | None = None
         self.forces:     wp.array | None = None
 
-        self._n:     int = 0
-        self._frame: int = 0
+        self._n:            int = 0
+        self._frame:        int = 0
+        self._active_count: wp.array | None = None
 
         self.G:                  float = 0.001
         self.softening:          float = 0.05
@@ -127,15 +142,28 @@ class NBodySimulation:
         radii_np   = (BASE_RADIUS * (masses_np / BASE_MASS) ** (1.0 / 3.0)).astype(np.float32)
         self.radii = wp.array(radii_np, dtype=float, device="cuda")
 
+        self._active_count = wp.zeros(1, dtype=int, device="cuda")
+
     def free(self) -> None:
-        self.positions  = None
-        self.velocities = None
-        self.masses     = None
-        self.radii      = None
-        self.active     = None
-        self.forces     = None
-        self._n         = 0
-        self._frame     = 0
+        self.positions     = None
+        self.velocities    = None
+        self.masses        = None
+        self.radii         = None
+        self.active        = None
+        self.forces        = None
+        self._active_count = None
+        self._n            = 0
+        self._frame        = 0
+
+    def count_active(self) -> int:
+        # returns the number of active bodies. copies only 1 int from GPU -> CPU
+        if self.active is None:
+            return 0
+        wp.launch(kernel_reset_int,    dim=1,       device="cuda", inputs=[self._active_count])
+        wp.launch(kernel_count_active, dim=self._n, device="cuda", inputs=[
+            self.active, self._active_count,
+        ])
+        return int(self._active_count.numpy()[0])
 
     def step(self) -> None:
         if self.positions is None:
