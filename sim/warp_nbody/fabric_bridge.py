@@ -5,9 +5,9 @@ import omni.usd
 from .instancer import INSTANCER_PATH, NEURAL_INSTANCER_PATH
 from .kernels.visual import kernel_compute_scales
 
-_VISUAL_SCALE_REF = 3.0   # scale at reference body count
-_VISUAL_CAP_REF   = 15.0  # cap at reference body count
-_N_REF            = 1000  # reference body count
+_VISUAL_SCALE_REF = 3.0
+_VISUAL_CAP_REF   = 15.0
+_N_REF            = 1000
 
 
 class FabricBridge:

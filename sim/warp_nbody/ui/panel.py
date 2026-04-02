@@ -37,7 +37,7 @@ class NBodyPanel:
         self._accretion_model = ui.SimpleBoolModel(True)
 
     def build(self, on_spawn, on_stop) -> None:
-        self._window = ui.Window("N-Body Gravity Simulator", width=340, height=520)
+        self._window = ui.Window("N-Body Gravity Simulator", width=340, height=560)
         with self._window.frame:
             with ui.VStack(spacing=8, height=0):
                 self._build_preset_row()
@@ -53,13 +53,25 @@ class NBodyPanel:
                 self._build_neural_section()
 
     def _build_preset_row(self) -> None:
-        ui.Label("Preset", height=14)
+        self._preset_label = ui.Label(f"Preset: {self._selected_preset}", height=18)
+        self._preset_buttons = {}
         with ui.HStack(spacing=4, height=28):
             for preset in PRESETS:
-                ui.Button(preset, clicked_fn=lambda p=preset: self._select_preset(p), height=28)
+                btn = ui.Button(preset, clicked_fn=lambda p=preset: self._select_preset(p), height=28)
+                self._preset_buttons[preset] = btn
+        self._highlight_preset()
 
     def _select_preset(self, preset: str) -> None:
         self._selected_preset = preset
+        self._preset_label.text = f"Preset: {preset}"
+        self._highlight_preset()
+
+    def _highlight_preset(self) -> None:
+        for name, btn in self._preset_buttons.items():
+            if name == self._selected_preset:
+                btn.style = {"Button": {"background_color": 0xFF4488CC, "border_radius": 4}}
+            else:
+                btn.style = {"Button": {"background_color": 0xFF333333, "border_radius": 4}}
 
     def _build_float_slider(self, label, model, min_val, max_val) -> None:
         with ui.VStack(spacing=2, height=0):

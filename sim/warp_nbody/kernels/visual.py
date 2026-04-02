@@ -13,7 +13,7 @@ def kernel_compute_scales(
     if active[i] == 0:
         scales[i] = wp.vec3(0.0, 0.0, 0.0)
         return
-    r = wp.min(radii[i] * v_scale, v_cap)
+    r = wp.max(wp.min(radii[i] * v_scale, v_cap), radii[i])
     scales[i] = wp.vec3(r, r, r)
 
 
