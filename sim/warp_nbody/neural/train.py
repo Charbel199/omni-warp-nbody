@@ -132,38 +132,6 @@ def train(args: argparse.Namespace) -> None:
     print(f"[train] Best val loss: {best_val_loss:.6f} at epoch {best_epoch}")
     print(f"[train] Checkpoint: {output_dir / 'model_best.pt'}")
 
-    _inference_benchmark(model, device)
-
-
-def _inference_benchmark(model: NBodyGNN, device: torch.device) -> None:
-    print("\n--- Inference Timing Benchmark ---")
-    print(f"{'N':>8} | {'Time (ms)':>12}")
-    print("-" * 26)
-
-    model.eval()
-    for n in [1_000, 10_000, 100_000]:
-        pos = torch.randn(n, 3, device=device)
-        vel = torch.randn(n, 3, device=device)
-        mass = torch.ones(n, 1, device=device)
-
-        with torch.no_grad():
-            for _ in range(10):
-                model(pos, vel, mass)
-
-        start = torch.cuda.Event(enable_timing=True)
-        end = torch.cuda.Event(enable_timing=True)
-
-        with torch.no_grad():
-            start.record()
-            for _ in range(10):
-                model(pos, vel, mass)
-            end.record()
-
-        torch.cuda.synchronize()
-        elapsed_ms = start.elapsed_time(end) / 10.0
-        print(f"{n:>8} | {elapsed_ms:>12.3f}")
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=100)
