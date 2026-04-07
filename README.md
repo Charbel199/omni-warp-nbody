@@ -8,6 +8,168 @@ GPU-accelerated N-body gravitational simulation in NVIDIA Omniverse, powered by 
 
 All physics runs on the GPU through WARP kernels. Each frame, gravity is computed between all pairs of bodies (O(N^2)), velocities and positions are integrated, and overlapping bodies merge. Nothing leaves the GPU. Positions get synced to USD/Fabric for rendering through a zero-copy bridge so the simulation loop never touches the CPU (almost).
 
+## Kernels
+
+The core of the simulation is just a few WARP kernels.
+
+### Gravity
+
+Brute-force O(N^2). Every body computes the gravitational pull from every other body. Softening prevents singularities when bodies get close.
+
+```python
+@wp.kernel
+def kernel_forces(
+    positions:   wp.array(dtype=wp.vec3),
+    masses:      wp.array(dtype=float),
+    active:      wp.array(dtype=int),
+    forces:      wp.array(dtype=wp.vec3),
+    G:           float,
+    softening_sq: float,
+    n:           int,
+):
+    i = wp.tid()
+    if active[i] == 0:
+        return
+    f  = wp.vec3(0.0, 0.0, 0.0)
+    pi = positions[i]
+    mi = masses[i]
+    for j in range(n):
+        if j == i or active[j] == 0:
+            continue
+        r        = positions[j] - pi
+        dist_sq  = wp.dot(r, r) + softening_sq
+        inv_dist3 = 1.0 / (dist_sq * wp.sqrt(dist_sq))
+        f = f + r * (G * mi * masses[j] * inv_dist3)
+    forces[i] = f
+```
+
+### Integration
+
+Simple Euler integration. Acceleration from the force kernel gets applied to velocity, then velocity to position.
+
+```python
+@wp.kernel
+def kernel_integrate(
+    positions:  wp.array(dtype=wp.vec3),
+    velocities: wp.array(dtype=wp.vec3),
+    forces:     wp.array(dtype=wp.vec3),
+    masses:     wp.array(dtype=float),
+    active:     wp.array(dtype=int),
+    dt:         float,
+):
+    i = wp.tid()
+    if active[i] == 0:
+        return
+    acc         = forces[i] * (1.0 / masses[i])
+    velocities[i] = velocities[i] + acc * dt
+    positions[i]  = positions[i]  + velocities[i] * dt
+```
+
+### Accretion (merging)
+
+Two-pass kernel. First pass checks if two bodies overlap and marks the lighter one for merging. Second pass transfers mass and deactivates the absorbed body, then recomputes the radius based on the new mass.
+
+```python
+@wp.kernel
+def kernel_accrete_pass1(
+    positions:  wp.array(dtype=wp.vec3),
+    masses:     wp.array(dtype=float),
+    radii:      wp.array(dtype=float),
+    active:     wp.array(dtype=int),
+    merge_into: wp.array(dtype=int),
+    n:          int,
+):
+    i = wp.tid()
+    if active[i] == 0:
+        return
+    merge_into[i] = -1
+    pi = positions[i]
+    mi = masses[i]
+    for j in range(n):
+        if j == i or active[j] == 0:
+            continue
+        dist = wp.length(positions[j] - pi)
+        if dist < radii[i] + radii[j]:
+            if masses[j] > mi or (masses[j] == mi and j < i):
+                merge_into[i] = j
+                return
+
+@wp.kernel
+def kernel_accrete_pass2(
+    masses:     wp.array(dtype=float),
+    radii:      wp.array(dtype=float),
+    active:     wp.array(dtype=int),
+    merge_into: wp.array(dtype=int),
+    base_mass:   float,
+    base_radius: float,
+):
+    i = wp.tid()
+    if active[i] == 0 or merge_into[i] == -1:
+        return
+    j = merge_into[i]
+    wp.atomic_add(masses, j, masses[i])
+    active[i] = 0
+    radii[j]  = base_radius * wp.pow(masses[j] / base_mass, 1.0 / 3.0)
+```
+
+### Colorization
+
+Colors are computed on GPU too. Each body gets a color based on its mass and speed relative to the current max. Heavy/fast bodies shift from blue to orange.
+
+```python
+@wp.kernel
+def kernel_colorize(
+    masses:        wp.array(dtype=float),
+    velocities:    wp.array(dtype=wp.vec3),
+    active:        wp.array(dtype=int),
+    colors:        wp.array(dtype=wp.vec3),
+    max_mass_arr:  wp.array(dtype=float),
+    max_speed_arr: wp.array(dtype=float),
+):
+    i = wp.tid()
+    if active[i] == 0:
+        colors[i] = wp.vec3(0.0, 0.0, 0.0)
+        return
+    max_mass  = wp.max(max_mass_arr[0],  float(1e-6))
+    max_speed = wp.max(max_speed_arr[0], float(1e-6))
+    t_mass  = wp.min(masses[i] / max_mass, 1.0)
+    t_speed = wp.min(wp.length(velocities[i]) / max_speed, 1.0)
+    t = t_mass * 0.7 + t_speed * 0.3
+    if t < 0.5:
+        s = t * 2.0
+        colors[i] = wp.vec3(s * 0.9 + 0.1, s * 0.9 + 0.1, 1.0)
+    else:
+        s = (t - 0.5) * 2.0
+        colors[i] = wp.vec3(1.0, 1.0 - s * 0.6, 1.0 - s)
+```
+
+## Fabric Bridge (keeping it on GPU)
+
+The simulation never copies data back to CPU for rendering. Omniverse's Fabric API (via USDRT) lets us write GPU buffers directly into USD attributes. The `mark_dirty` method runs every frame:
+
+```python
+def mark_dirty(self) -> None:
+    with wp.ScopedDevice("cuda:0"):
+        # GPU -> GPU: copy sim positions into scratch buffer
+        wp.copy(self._pos_wp, self._sim.positions)
+
+        # compute scales on GPU
+        wp.launch(kernel_compute_scales, dim=self._n, device="cuda:0", inputs=[
+            self._sim.radii, self._sim.active, self._scales_wp,
+            self._visual_scale, self._visual_cap,
+        ])
+
+        # compute colors on GPU
+        self._colorizer.compute_colors(self._sim, self._colors_wp)
+
+        # push to Fabric (GPU -> GPU copies via USDRT)
+        self._pos_attr.Set(Vt.Vec3fArray(self._pos_wp))
+        self._scale_attr.Set(Vt.Vec3fArray(self._scales_wp))
+        self._color_attr.Set(Vt.Vec3fArray(self._colors_wp))
+```
+
+Warp arrays go into USDRT `Vt` arrays which live on the same device. No `cuda.memcpy` to host, no numpy, no CPU staging buffers. The renderer picks up the updated Fabric attributes directly.
+
 ## Presets
 
 ### Galaxy Disk
