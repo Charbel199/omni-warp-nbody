@@ -213,9 +213,9 @@ This is experimental. The network learns decent force approximations per preset 
 Each preset has its own data/training/checkpoint pipeline since the dynamics and mass scales are very different between setups.
 
 1. Pick a preset in the UI
-2. Generate data - run the classical sim and record positions, velocities, masses, and accelerations to HDF5
-3. Train - train a GNS-style GNN on the recorded data
-4. Infer - load the model, predict forces through a zero-copy Warp-to-PyTorch bridge
+2. Generate data, run the classical sim and record positions, velocities, masses, and accelerations to HDF5
+3. Train a GNS-style GNN on the recorded data
+4. Infer, load the model, predict forces through a zero-copy Warp-to-PyTorch bridge
 
 ### Architecture
 
